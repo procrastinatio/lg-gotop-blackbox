@@ -13,6 +13,10 @@ pub struct Config {
     pub collect_event_log: bool,
     pub event_log_count: u32,
     pub logs: Vec<LogSource>,
+    /// Directory holding `gotop.server.config.yml` (only its `EnvironmentName` key is read).
+    pub gotop_config_dir: String,
+    /// Environment variables recorded in the report; a trailing `*` is a prefix wildcard.
+    pub env_vars: Vec<String>,
     /// Hostname prefixes (case-insensitive) used to classify the machine in report.json.
     pub vdi_prefixes: Vec<String>,
     pub laptop_prefixes: Vec<String>,
@@ -49,6 +53,8 @@ impl Default for Config {
             processes: vec!["ArcGISPro".into(), "GOTOP".into(), "ArcGISIndexing".into()],
             collect_event_log: true,
             event_log_count: 50,
+            gotop_config_dir: r"%LOCALAPPDATA%\swisstopo\GoTop\Config".into(),
+            env_vars: vec!["GOTOP_*".into(), "TNS_ADMIN".into()],
             vdi_prefixes: vec!["cvt".into()],
             laptop_prefixes: vec!["cm".into()],
             logs: vec![

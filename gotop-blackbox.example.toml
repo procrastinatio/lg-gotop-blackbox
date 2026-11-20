@@ -23,6 +23,18 @@ processes = ["ArcGISPro", "GOTOP", "ArcGISIndexing"]
 collect_event_log = true
 event_log_count = 50
 
+# Where gotop.server.config.yml lives. Only its `EnvironmentName` key is read (never copied).
+gotop_config_dir = '%LOCALAPPDATA%\swisstopo\GoTop\Config'
+
+# Environment variables recorded in report.json / summary.txt ("*" = prefix wildcard).
+# Set by the GOTOP environment-changer script: GOTOP_CENTRAL_TOOL_DEFAULTS, GOTOP_DDX_ENVIRONMENT,
+# GOTOP_SERVER_DIR, TNS_ADMIN. Do NOT add variables that may hold secrets.
+env_vars = ["GOTOP_*", "TNS_ADMIN"]
+
+# Hostname prefixes used to label the machine as vdi / laptop in the report.
+vdi_prefixes = ["cvt"]
+laptop_prefixes = ["cm"]
+
 # GOTOP logs: <type>.<pid>.log[.n], e.g. gotop.navigator.debug.7716.log
 # `per_type = true` takes the newest NON-EMPTY file of each type (arcgispro / navigator /
 # microservice.{editing,geometry,qa} x debug / error). Types that may be absent are simply skipped,

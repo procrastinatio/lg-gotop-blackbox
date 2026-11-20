@@ -4,6 +4,7 @@ mod bundle;
 mod config;
 mod diag;
 mod events;
+mod gotop_info;
 #[cfg(windows)]
 mod gui;
 mod logs;

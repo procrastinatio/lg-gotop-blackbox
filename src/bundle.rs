@@ -1,4 +1,5 @@
 use crate::config::{expand_env, Config, LogSource};
+use crate::gotop_info::{self, GotopInfo};
 use crate::{events, logs, snapshot::Snapshot};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -17,6 +18,7 @@ struct Report<'a> {
     message: &'a str,
     #[serde(flatten)]
     snapshot: &'a Snapshot,
+    gotop: &'a GotopInfo,
     warnings: &'a [String],
 }
 
@@ -92,10 +94,47 @@ pub fn write(cfg: &Config, snap: &Snapshot, message: &str, include_screenshot: b
         }
     }
 
-    let report = Report { message, snapshot: snap, warnings: &warnings };
+    let (gotop, gotop_warnings) = gotop_info::collect(cfg);
+    warnings.extend(gotop_warnings);
+
+    std::fs::write(dir.join("summary.txt"), summary(snap, &gotop, message, &warnings))?;
+    let report = Report { message, snapshot: snap, gotop: &gotop, warnings: &warnings };
     std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&report)?)?;
 
     Ok(BundleResult { path: dir, used_fallback, warnings })
+}
+
+/// One-glance overview for whoever opens the bundle first.
+fn summary(snap: &Snapshot, g: &GotopInfo, message: &str, warnings: &[String]) -> String {
+    let or_unknown = |o: &Option<String>| o.clone().unwrap_or_else(|| "unknown".into());
+    let ddx = g.env_vars.iter().find(|(k, _)| k.eq_ignore_ascii_case("GOTOP_DDX_ENVIRONMENT")).map(|(_, v)| v.as_str());
+    let mut s = String::new();
+    s.push_str(&format!("gotop-blackbox {}   {}\n", snap.tool_version, snap.timestamp));
+    s.push_str(&format!("Host: {} ({})   User: {}\n", snap.host, snap.machine_kind, snap.user));
+    s.push_str(&format!("OS: {}   RAM used: {} / {} MB\n", snap.os, snap.used_mem_mb, snap.total_mem_mb));
+    s.push_str(&format!(
+        "GOTOP add-in: {}   ArcGIS Pro: {}   {}\n",
+        or_unknown(&g.addin_version),
+        or_unknown(&g.arcgis_pro_version),
+        or_unknown(&g.dotnet_runtime)
+    ));
+    s.push_str(&format!("GOTOP server: {}\n", or_unknown(&g.server_version)));
+    s.push_str(&format!(
+        "Environment: {}   (GOTOP_DDX_ENVIRONMENT: {})\n",
+        or_unknown(&g.environment_name),
+        ddx.unwrap_or("unset")
+    ));
+    for p in snap.processes.iter().take(5) {
+        s.push_str(&format!("  {} (pid {}): {} MB RSS\n", p.name, p.pid, p.rss_mb));
+    }
+    s.push_str(&format!("\nUser message:\n{message}\n"));
+    if !warnings.is_empty() {
+        s.push_str("\nWarnings:\n");
+        for w in warnings {
+            s.push_str(&format!("- {w}\n"));
+        }
+    }
+    s
 }
 
 fn collect_log_source(cfg: &Config, src: &LogSource, bundle: &Path, warnings: &mut Vec<String>) -> Result<()> {
