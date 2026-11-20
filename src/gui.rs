@@ -63,16 +63,17 @@ pub struct App {
     #[nwg_layout(parent: window, spacing: 6, margin: [12, 14, 12, 14], max_row: Some(23), max_column: Some(12))]
     layout: nwg::GridLayout,
 
-    #[nwg_control(text: "GOTOP Blackbox")]
+    #[nwg_control(text: "GOTOP Blackbox", background_color: Some([255, 240, 246]))]
     #[nwg_layout_item(layout: layout, row: 0, col: 2, col_span: 10, row_span: 2)]
     heading: nwg::Label,
 
     // Explicit line break: static labels do not wrap on their own.
-    #[nwg_control(text: "Collects versions, today's logs\r\nand an optional screenshot.")]
+    // `background_color` matches BG: nwg paints the label's top/bottom strips with it (else grey bands).
+    #[nwg_control(text: "Collects versions, today's logs\r\nand an optional screenshot.", background_color: Some([255, 240, 246]))]
     #[nwg_layout_item(layout: layout, row: 2, col: 2, col_span: 10, row_span: 2)]
     subtitle: nwg::Label,
 
-    #[nwg_control(text: "What happened?")]
+    #[nwg_control(text: "What happened?", background_color: Some([255, 240, 246]))]
     #[nwg_layout_item(layout: layout, row: 4, col: 0, col_span: 12)]
     prompt: nwg::Label,
 
