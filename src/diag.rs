@@ -30,6 +30,8 @@ pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let text = format!("panic: {info}");
         log(&text);
+        #[cfg(windows)]
+        crate::gui::restore_cursors(); // never leave the busy pointer behind
         notify(
             "gotop-blackbox crashed",
             &format!("{text}\n\nDetails: {}", log_path().display()),

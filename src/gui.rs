@@ -28,7 +28,8 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, GetSystemMetrics, IsIconic, LoadImageW, SendMessageW, SetClassLongPtrW, SetForegroundWindow,
     SetProcessDPIAware, DispatchMessageW, PeekMessageW, SetWindowPos, TranslateMessage, HWND_TOPMOST, MINMAXINFO, MSG,
-    PM_REMOVE, SWP_SHOWWINDOW, WM_GETMINMAXINFO, WM_SIZE, ShowWindow, GCLP_HBRBACKGROUND, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXICON, SM_CXSMICON,
+    PM_REMOVE, SWP_SHOWWINDOW, WM_GETMINMAXINFO, WM_SIZE, CopyIcon, LoadCursorW, SetSystemCursor, SystemParametersInfoW,
+    HCURSOR, HICON, IDC_APPSTARTING, OCR_NORMAL, SPIF_SENDCHANGE, SPI_SETCURSORS, ShowWindow, GCLP_HBRBACKGROUND, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXICON, SM_CXSMICON,
     SM_CYICON, SM_CYSMICON, STM_SETICON, SW_MINIMIZE, SW_RESTORE, WINDOW_EX_STYLE, WINDOW_STYLE,
     WM_CTLCOLORSTATIC, WM_SETICON, WS_CHILD, WS_VISIBLE,
 };
@@ -124,6 +125,9 @@ impl App {
     }
 
     fn exit(&self) {
+        if self.deadline.get().is_some() {
+            restore_cursors();
+        }
         nwg::stop_thread_dispatch();
     }
 
@@ -146,6 +150,7 @@ impl App {
                 let _ = ShowWindow(h, SW_MINIMIZE);
             }
         }
+        busy_cursor();
         self.timer.start();
         diag::log(&format!("screenshot countdown started ({secs} s)"));
     }
@@ -176,6 +181,7 @@ impl App {
         self.timer.stop();
         self.deadline.set(None);
         let result = screenshot::capture_png();
+        restore_cursors();
         if let Some(h) = hwnd {
             unsafe {
                 let _ = ShowWindow(h, SW_RESTORE);
@@ -241,6 +247,26 @@ impl App {
                 nwg::modal_error_message(&self.window, "Could not save bundle", &format!("{e:#}"));
             }
         }
+    }
+}
+
+/// Show the "working in background" pointer (arrow + spinner) system-wide while the countdown runs.
+/// The window is minimized then, so a per-window cursor would never be seen.
+fn busy_cursor() {
+    unsafe {
+        let Ok(cursor) = LoadCursorW(None, IDC_APPSTARTING) else { return };
+        // SetSystemCursor takes ownership of the handle, so hand it a copy.
+        let Ok(copy) = CopyIcon(HICON(cursor.0)) else { return };
+        if let Err(e) = SetSystemCursor(HCURSOR(copy.0), OCR_NORMAL) {
+            diag::log(&format!("busy cursor not set: {e}"));
+        }
+    }
+}
+
+/// Put the user's normal pointer scheme back. Safe to call at any time (also from the panic hook).
+pub fn restore_cursors() {
+    unsafe {
+        let _ = SystemParametersInfoW(SPI_SETCURSORS, 0, None, SPIF_SENDCHANGE);
     }
 }
 
@@ -407,6 +433,10 @@ pub fn run(cfg: Config, snap: Snapshot, selftest: bool, shots_dir: Option<std::p
             pump(1500);
             save_shot(dir, "3-shrunk.png");
         }
+        busy_cursor();
+        pump(200);
+        restore_cursors();
+        diag::log("gui self-test: busy cursor set and restored");
         // Exercise the screenshot path too (no countdown); a runner without a desktop may fail: log only.
         match screenshot::capture_png() {
             Ok(png) => diag::log(&format!("gui self-test: screenshot ok, {} KB", png.len() / 1024)),

@@ -134,8 +134,18 @@ fn summary(snap: &Snapshot, g: &GotopInfo, message: &str, warnings: &[String]) -
         g.instance.as_deref().unwrap_or("?"),
         ddx.unwrap_or("unset")
     ));
-    for p in snap.processes.iter().take(5) {
-        s.push_str(&format!("  {} (pid {}): {} MB RSS\n", p.name, p.pid, p.rss_mb));
+    let today = snap.timestamp.get(..10).unwrap_or("");
+    for p in snap.processes.iter().take(20) {
+        let started = match p.started.as_deref() {
+            Some(t) if t.starts_with(today) => format!("started {}", &t[11..]),
+            Some(t) => format!("started {t}"), // an earlier day: show the date
+            None => "start unknown".into(),
+        };
+        let orphan = match (p.parent_running, p.parent_pid) {
+            (Some(false), Some(pp)) => format!(", parent {pp} gone"),
+            _ => String::new(),
+        };
+        s.push_str(&format!("  {} (pid {}): {} MB RSS, {started}{orphan}\n", p.name, p.pid, p.rss_mb));
     }
     s.push_str(&format!("\nUser message:\n{message}\n"));
     if !warnings.is_empty() {

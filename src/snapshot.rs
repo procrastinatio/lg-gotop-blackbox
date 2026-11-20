@@ -9,6 +9,12 @@ pub struct ProcInfo {
     pub name: String,
     pub rss_mb: u64,
     pub virtual_mb: u64,
+    /// Local start time `YYYY-MM-DD HH:MM:SS` (reveals leftovers from earlier sessions).
+    pub started: Option<String>,
+    pub parent_pid: Option<u32>,
+    /// Whether the parent process still exists (`false` = orphaned, e.g. a microservice whose
+    /// ArcGIS Pro instance has exited). Windows keeps the dead parent's PID, so this is meaningful.
+    pub parent_running: Option<bool>,
 }
 
 /// Machine/user context plus a memory sample. The sample is taken at launch and refreshed
@@ -58,10 +64,15 @@ fn sample(cfg: &Config) -> (u64, u64, Vec<ProcInfo>) {
                 name,
                 rss_mb: p.memory() / MB,
                 virtual_mb: p.virtual_memory() / MB,
+                started: chrono::DateTime::<chrono::Utc>::from_timestamp(p.start_time() as i64, 0)
+                    .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string()),
+                parent_pid: p.parent().map(|pp| pp.as_u32()),
+                parent_running: p.parent().map(|pp| sys.process(pp).is_some()),
             })
         })
         .collect();
-    processes.sort_by_key(|p| std::cmp::Reverse(p.rss_mb));
+    // Group by name, oldest first, so duplicates and leftovers stand out.
+    processes.sort_by(|a, b| a.name.cmp(&b.name).then(a.started.cmp(&b.started)));
     (sys.total_memory() / MB, sys.used_memory() / MB, processes)
 }
 
@@ -116,6 +127,20 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn records_start_time_and_parent_of_a_child_process() {
+        let mut child = std::process::Command::new("sleep").arg("3").spawn().unwrap();
+        let cfg = Config { processes: vec!["sleep".into()], ..Config::default() };
+        let (_, _, procs) = sample(&cfg);
+        child.kill().ok();
+        child.wait().ok();
+        let p = procs.iter().find(|p| p.pid == child.id()).expect("child not listed");
+        assert_eq!(p.parent_pid, Some(std::process::id()));
+        assert_eq!(p.parent_running, Some(true));
+        assert!(p.started.as_deref().is_some_and(|s| s.len() == 19), "{:?}", p.started);
+    }
 
     #[test]
     fn refresh_updates_report_time_but_not_launch_time() {
