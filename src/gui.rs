@@ -20,12 +20,15 @@ use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, POINT, WPARAM};
-use windows::Win32::Graphics::Gdi::{CreateSolidBrush, InvalidateRect, SetBkMode, SetTextColor, HDC, TRANSPARENT};
+use windows::Win32::Graphics::Gdi::{
+    CreateSolidBrush, InvalidateRect, RedrawWindow, SetBkMode, SetTextColor, HDC, RDW_ALLCHILDREN, RDW_ERASE,
+    RDW_INVALIDATE, TRANSPARENT,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, GetSystemMetrics, IsIconic, LoadImageW, SendMessageW, SetClassLongPtrW, SetForegroundWindow,
     SetProcessDPIAware, DispatchMessageW, PeekMessageW, SetWindowPos, TranslateMessage, HWND_TOPMOST, MINMAXINFO, MSG,
-    PM_REMOVE, SWP_SHOWWINDOW, WM_GETMINMAXINFO, ShowWindow, GCLP_HBRBACKGROUND, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXICON, SM_CXSMICON,
+    PM_REMOVE, SWP_SHOWWINDOW, WM_GETMINMAXINFO, WM_SIZE, ShowWindow, GCLP_HBRBACKGROUND, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXICON, SM_CXSMICON,
     SM_CYICON, SM_CYSMICON, STM_SETICON, SW_MINIMIZE, SW_RESTORE, WINDOW_EX_STYLE, WINDOW_STYLE,
     WM_CTLCOLORSTATIC, WM_SETICON, WS_CHILD, WS_VISIBLE,
 };
@@ -302,7 +305,14 @@ fn apply_theme(app: &App, hwnd: HWND) {
         (brush.0 as isize, app.heading.handle.hwnd().map(|h| h as isize))
     };
 
-    let handler = nwg::bind_raw_event_handler(&app.window.handle, 0x10000, move |_hwnd, msg, wparam, lparam| {
+    let handler = nwg::bind_raw_event_handler(&app.window.handle, 0x10000, move |h, msg, wparam, lparam| {
+        if msg == WM_SIZE {
+            // Transparent labels leave ghosts where the layout moved them: repaint everything.
+            unsafe {
+                let _ = RedrawWindow(HWND(h as *mut _), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
+            }
+            return None; // let nwg's own layout handler run too
+        }
         if msg == WM_GETMINMAXINFO {
             unsafe {
                 let info = &mut *(lparam as *mut MINMAXINFO);
@@ -390,6 +400,11 @@ pub fn run(cfg: Config, snap: Snapshot, selftest: bool, shots_dir: Option<std::p
             }
             pump(1500);
             save_shot(dir, "2-enlarged.png");
+            unsafe {
+                let _ = SetWindowPos(hwnd, HWND_TOPMOST, 20, 20, 700, 640, SWP_SHOWWINDOW);
+            }
+            pump(1500);
+            save_shot(dir, "3-shrunk.png");
         }
         // Exercise the screenshot path too (no countdown); a runner without a desktop may fail: log only.
         match screenshot::capture_png() {
