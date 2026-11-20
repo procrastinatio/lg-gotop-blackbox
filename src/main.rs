@@ -37,6 +37,7 @@ struct Args {
     headless: bool,
     message: String,
     no_screenshot: bool,
+    gui_selftest: bool,
 }
 
 fn parse_args() -> Result<Option<Args>> {
@@ -48,6 +49,7 @@ fn parse_args() -> Result<Option<Args>> {
             "--message" => a.message = it.next().ok_or_else(|| anyhow::anyhow!("--message needs a value"))?,
             "--headless" => a.headless = true,
             "--no-screenshot" => a.no_screenshot = true,
+            "--gui-selftest" => a.gui_selftest = true, // build the window, then quit (CI)
             "--version" => {
                 diag::notify("gotop-blackbox", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
@@ -82,7 +84,7 @@ fn run() -> Result<()> {
     #[cfg(windows)]
     if !args.headless {
         diag::log("opening window");
-        let r = gui::run(cfg, snap);
+        let r = gui::run(cfg, snap, args.gui_selftest);
         diag::log(&format!("window closed: {}", if r.is_ok() { "ok".to_string() } else { format!("{r:?}") }));
         return r;
     }

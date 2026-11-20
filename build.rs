@@ -1,6 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=assets/gotop-blackbox.rc");
     println!("cargo:rerun-if-changed=assets/gotop-blackbox.manifest");
+    println!("cargo:rerun-if-changed=assets/gotop-blackbox.ico");
 
     // Embed the application manifest (Common Controls v6) into the MSVC build.
     #[cfg(windows)]
