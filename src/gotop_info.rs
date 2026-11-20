@@ -129,6 +129,7 @@ pub fn parse_runtime_line(line: &str) -> Option<String> {
 pub fn yaml_value(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let (k, v) = line.trim().split_once(':')?;
+        let k = k.trim().trim_start_matches("- "); // YAML list item: "- EnvironmentName: X"
         if !k.trim().eq_ignore_ascii_case(key) {
             return None;
         }
@@ -211,13 +212,10 @@ fn gotop_log_dir(cfg: &Config) -> Option<PathBuf> {
         .find_map(|src| src.candidates().into_iter().find(|d| d.is_dir()))
 }
 
-/// Newest non-empty `gotop.arcgispro.debug` log in `dir`.
-fn find_version_log(dir: &Path) -> Option<PathBuf> {
-    logs::latest_per_type(dir)
-        .ok()?
-        .into_iter()
-        .find(|t| t.log_type == VERSION_LOG_TYPE)?
-        .file
+/// Newest non-empty `gotop.arcgispro.debug` log in `dir`, with its modification time.
+fn find_version_log(dir: &Path) -> Option<(PathBuf, Option<std::time::SystemTime>)> {
+    let t = logs::latest_per_type(dir).ok()?.into_iter().find(|t| t.log_type == VERSION_LOG_TYPE)?;
+    Some((t.file?, t.modified))
 }
 
 pub fn collect(cfg: &Config) -> (GotopInfo, Vec<String>) {
@@ -232,7 +230,14 @@ pub fn collect(cfg: &Config) -> (GotopInfo, Vec<String>) {
 
     match log_dir.as_deref().and_then(find_version_log) {
         None => warnings.push("versions: no gotop.arcgispro.debug log found".into()),
-        Some(base) => {
+        Some((base, modified)) => {
+            // Versions still come from the newest log even if it is old, but say so.
+            if let Some(m) = modified.filter(|m| cfg.logs_today_only && *m < logs::local_midnight()) {
+                warnings.push(format!(
+                    "versions come from an older session (ArcGIS Pro log last modified {}); no GOTOP session today",
+                    chrono::DateTime::<chrono::Local>::from(m).format("%Y-%m-%d %H:%M")
+                ));
+            }
             for path in search_order(&base) {
                 let Ok(head) = read_head(&path) else { continue };
                 for line in head.lines() {
@@ -333,6 +338,7 @@ mod tests {
         let y = "# comment\nfoo: 1\n  EnvironmentName: \"GCOVER Production\"  # trailing\nbar: 2\n";
         assert_eq!(yaml_value(y, "environmentname").as_deref(), Some("GCOVER Production"));
         assert_eq!(yaml_value(y, "missing"), None);
+        assert_eq!(yaml_value("envs:\n  - EnvironmentName: GCOVERP_DDX\n", "EnvironmentName").as_deref(), Some("GCOVERP_DDX"));
         assert_eq!(
             server_version_from_dir(r"\\v0t\prod\GoTop\Server\GoTop_Server_0.3.2.2_ArcGISPro_3.7").as_deref(),
             Some("0.3.2.2")

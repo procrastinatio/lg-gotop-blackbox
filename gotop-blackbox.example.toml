@@ -13,6 +13,9 @@ share_path = '\\fileserver\share\path\gotop-blackbox'
 # Lines kept from the end of each log file. If the current file is shorter
 # (just rotated), the missing lines come from its ".1" predecessor.
 tail_lines = 200
+# Only collect log files modified today (since local midnight). Pool VDIs are reset every night, and
+# yesterday's session is rarely relevant. Types with no file today are still listed in index.txt.
+logs_today_only = true
 # Only for sources without `per_type`: how many recent files to take.
 max_files_per_source = 3
 

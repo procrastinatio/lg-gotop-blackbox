@@ -49,54 +49,54 @@ pub struct App {
     /// When the screenshot is due (None = idle). Wall-clock based because nwg timers tick irregularly.
     deadline: Cell<Option<Instant>>,
 
-    #[nwg_control(size: (540, 500), position: (300, 150), title: "GOTOP Blackbox", flags: "WINDOW|VISIBLE")]
+    #[nwg_control(size: (600, 540), position: (300, 150), title: "GOTOP Blackbox", flags: "WINDOW|VISIBLE")]
     #[nwg_events(OnWindowClose: [App::exit])]
     window: nwg::Window,
 
-    #[nwg_layout(parent: window, spacing: 6, margin: [12, 14, 12, 14], max_row: Some(10), max_column: Some(12))]
+    #[nwg_layout(parent: window, spacing: 6, margin: [12, 14, 12, 14], max_row: Some(11), max_column: Some(12))]
     layout: nwg::GridLayout,
 
-    // Rows 0-1, columns 0-1 are left free for the flower (drawn in `add_flower`).
+    // Rows 0-2, columns 0-1 are left free for the flower (drawn in `add_flower`).
     #[nwg_control(text: "GOTOP Blackbox")]
     #[nwg_layout_item(layout: layout, row: 0, col: 2, col_span: 10)]
     heading: nwg::Label,
 
-    #[nwg_control(text: "Collects versions, logs and a screenshot for support.")]
-    #[nwg_layout_item(layout: layout, row: 1, col: 2, col_span: 10)]
+    #[nwg_control(text: "Collects versions, today's logs and an optional screenshot for support.")]
+    #[nwg_layout_item(layout: layout, row: 1, col: 2, col_span: 10, row_span: 2)]
     subtitle: nwg::Label,
 
     #[nwg_control(text: "What happened?")]
-    #[nwg_layout_item(layout: layout, row: 2, col: 0, col_span: 12)]
+    #[nwg_layout_item(layout: layout, row: 3, col: 0, col_span: 12)]
     prompt: nwg::Label,
 
     #[nwg_control(flags: "VISIBLE|VSCROLL|AUTOVSCROLL|TAB_STOP")]
-    #[nwg_layout_item(layout: layout, row: 3, col: 0, col_span: 12, row_span: 4)]
+    #[nwg_layout_item(layout: layout, row: 4, col: 0, col_span: 12, row_span: 4)]
     message: nwg::TextBox,
 
     #[nwg_control(text: "Take screenshot...")]
-    #[nwg_layout_item(layout: layout, row: 7, col: 0, col_span: 6)]
+    #[nwg_layout_item(layout: layout, row: 8, col: 0, col_span: 6)]
     #[nwg_events(OnButtonClick: [App::start_shot])]
     shot_btn: nwg::Button,
 
     #[nwg_control(collection: vec!["after 3 s", "after 5 s", "after 10 s"], selected_index: Some(1))]
-    #[nwg_layout_item(layout: layout, row: 7, col: 6, col_span: 3)]
+    #[nwg_layout_item(layout: layout, row: 8, col: 6, col_span: 3)]
     delay: nwg::ComboBox<&'static str>,
 
     #[nwg_control(text: "")]
-    #[nwg_layout_item(layout: layout, row: 7, col: 9, col_span: 3)]
+    #[nwg_layout_item(layout: layout, row: 8, col: 9, col_span: 3)]
     status: nwg::Label,
 
     #[nwg_control(text: "Include the screenshot in the bundle")]
-    #[nwg_layout_item(layout: layout, row: 8, col: 0, col_span: 12)]
+    #[nwg_layout_item(layout: layout, row: 9, col: 0, col_span: 12)]
     screenshot: nwg::CheckBox,
 
     #[nwg_control(text: "Save && send to support")]
-    #[nwg_layout_item(layout: layout, row: 9, col: 0, col_span: 9)]
+    #[nwg_layout_item(layout: layout, row: 10, col: 0, col_span: 9)]
     #[nwg_events(OnButtonClick: [App::save])]
     save_btn: nwg::Button,
 
     #[nwg_control(text: "Cancel")]
-    #[nwg_layout_item(layout: layout, row: 9, col: 9, col_span: 3)]
+    #[nwg_layout_item(layout: layout, row: 10, col: 9, col_span: 3)]
     #[nwg_events(OnButtonClick: [App::exit])]
     cancel_btn: nwg::Button,
 
@@ -176,6 +176,7 @@ impl App {
                 self.status.set_text(&format!("\u{2713} {} KB", png.len() / 1024));
                 snap.screenshot_png = Some(png);
                 snap.screenshot_error = None;
+                snap.screenshot_taken_at = Some(chrono::Local::now().to_rfc3339());
                 self.screenshot.set_enabled(true);
                 self.screenshot.set_check_state(nwg::CheckBoxState::Checked);
             }
@@ -189,11 +190,18 @@ impl App {
     }
 
     fn save(&self) {
-        let guard = self.data.borrow();
-        let Some((cfg, snap)) = guard.as_ref() else { return };
-        let include = self.screenshot.check_state() == nwg::CheckBoxState::Checked && snap.screenshot_png.is_some();
+        let message = self.message.text();
+        let include_wanted = self.screenshot.check_state() == nwg::CheckBoxState::Checked;
+        // Scope the borrow: the dialogs below run a nested message loop.
+        let result = {
+            let mut guard = self.data.borrow_mut();
+            let Some((cfg, snap)) = guard.as_mut() else { return };
+            snap.refresh(cfg); // memory/processes as they are now, not at launch
+            let include = include_wanted && snap.screenshot_png.is_some();
+            bundle::write(cfg, snap, &message, include)
+        };
 
-        match bundle::write(cfg, snap, &self.message.text(), include) {
+        match result {
             Ok(res) => {
                 diag::log(&format!("bundle written: {}", res.path.display()));
                 let mut text = format!("Bundle saved to:\n{}", res.path.display());

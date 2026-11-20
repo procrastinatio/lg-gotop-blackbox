@@ -9,6 +9,8 @@ pub struct Config {
     pub fallback_dir: String,
     pub tail_lines: usize,
     pub max_files_per_source: usize,
+    /// Only collect log files modified since local midnight (pool VDIs are reset every night).
+    pub logs_today_only: bool,
     pub processes: Vec<String>,
     pub collect_event_log: bool,
     pub event_log_count: u32,
@@ -52,6 +54,7 @@ impl Default for Config {
             fallback_dir: String::new(),
             tail_lines: 200,
             max_files_per_source: 3,
+            logs_today_only: true,
             processes: vec!["ArcGISPro".into(), "GOTOP".into(), "ArcGISIndexing".into()],
             collect_event_log: true,
             event_log_count: 50,

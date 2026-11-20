@@ -7,8 +7,25 @@ use std::time::SystemTime;
 /// Never read more than this from the end of a file (logs can be huge).
 const MAX_TAIL_BYTES: u64 = 2 * 1024 * 1024;
 
-/// Most recently modified files in `dir` whose extension is in `extensions`.
-pub fn newest_files(dir: &Path, extensions: &[String], max: usize) -> std::io::Result<Vec<PathBuf>> {
+/// Local midnight of the current day (start of "today").
+pub fn local_midnight() -> SystemTime {
+    use chrono::TimeZone;
+    let now = chrono::Local::now();
+    now.date_naive()
+        .and_hms_opt(0, 0, 0)
+        .and_then(|n| chrono::Local.from_local_datetime(&n).earliest())
+        .map(SystemTime::from)
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+/// Most recently modified files in `dir` whose extension is in `extensions`
+/// (and, if `since` is given, modified at or after it).
+pub fn newest_files(
+    dir: &Path,
+    extensions: &[String],
+    max: usize,
+    since: Option<SystemTime>,
+) -> std::io::Result<Vec<PathBuf>> {
     let mut files: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
@@ -18,6 +35,7 @@ pub fn newest_files(dir: &Path, extensions: &[String], max: usize) -> std::io::R
             extensions.iter().any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(&ext))
         })
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .filter(|(m, _)| since.is_none_or(|s| *m >= s))
         .collect();
     files.sort_by_key(|f| std::cmp::Reverse(f.0));
     Ok(files.into_iter().take(max).map(|(_, p)| p).collect())
@@ -142,6 +160,13 @@ mod tests {
         assert_eq!(tail_lines(&p, 2).unwrap(), "c\nd");
         assert_eq!(tail_lines(&p, 99).unwrap(), "a\nb\nc\nd");
         std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn local_midnight_is_within_the_last_day() {
+        let m = local_midnight();
+        let age = SystemTime::now().duration_since(m).unwrap();
+        assert!(age < std::time::Duration::from_secs(25 * 3600), "{age:?}");
     }
 
     #[test]

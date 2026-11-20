@@ -158,6 +158,10 @@ fn collect_log_source(cfg: &Config, src: &LogSource, bundle: &Path, warnings: &m
         return Ok(());
     };
     let out_dir = bundle.join("logs").join(sanitize(&src.label));
+    let since = cfg.logs_today_only.then(logs::local_midnight);
+    let fmt_time = |m: std::time::SystemTime| {
+        chrono::DateTime::<chrono::Local>::from(m).format("%Y-%m-%d %H:%M:%S").to_string()
+    };
 
     if src.per_type {
         let types = match logs::latest_per_type(&src_dir) {
@@ -176,29 +180,40 @@ fn collect_log_source(cfg: &Config, src: &LogSource, bundle: &Path, warnings: &m
         // ("the error log is empty" is itself useful evidence).
         let mut index = String::from("type | chosen file | modified | size (bytes) | files of this type\n");
         for t in &types {
-            match &t.file {
-                Some(f) => {
+            let today = match (&t.file, t.modified) {
+                (Some(f), Some(m)) if since.is_none_or(|s| m >= s) => Some((f, m)),
+                _ => None,
+            };
+            match (today, &t.file, t.modified) {
+                (Some((f, m)), _, _) => {
                     let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                    let modified = t
-                        .modified
-                        .map(|m| chrono::DateTime::<chrono::Local>::from(m).format("%Y-%m-%d %H:%M:%S").to_string())
-                        .unwrap_or_default();
-                    index.push_str(&format!("{} | {fname} | {modified} | {} | {}\n", t.log_type, t.size, t.candidates));
+                    index.push_str(&format!("{} | {fname} | {} | {} | {}\n", t.log_type, fmt_time(m), t.size, t.candidates));
                     match logs::tail_with_rotation(f, t.previous.as_deref(), cfg.tail_lines) {
                         Ok(text) => std::fs::write(out_dir.join(format!("{}.tail.txt", sanitize(fname))), text)?,
                         Err(e) => warnings.push(format!("cannot read {}: {e}", f.display())),
                     }
                 }
-                None => index.push_str(&format!("{} | (all empty) | | 0 | {}\n", t.log_type, t.candidates)),
+                // Older than today: not copied, but say what exists ("no activity today" is evidence too).
+                (None, Some(f), Some(m)) => {
+                    let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                    index.push_str(&format!(
+                        "{} | (none today; newest: {fname}, {}, {} bytes) | | | {}\n",
+                        t.log_type,
+                        fmt_time(m),
+                        t.size,
+                        t.candidates
+                    ));
+                }
+                _ => index.push_str(&format!("{} | (all empty) | | 0 | {}\n", t.log_type, t.candidates)),
             }
         }
         std::fs::write(out_dir.join("index.txt"), index)?;
         return Ok(());
     }
 
-    match logs::newest_files(&src_dir, &src.extensions, cfg.max_files_per_source) {
+    match logs::newest_files(&src_dir, &src.extensions, cfg.max_files_per_source, since) {
         Ok(files) if files.is_empty() => {
-            warnings.push(format!("log source '{}': no matching files in {}", src.label, src_dir.display()))
+            warnings.push(format!("log source '{}': no matching files{} in {}", src.label, if since.is_some() { " from today" } else { "" }, src_dir.display()))
         }
         Ok(files) => {
             std::fs::create_dir_all(&out_dir)?;
@@ -218,6 +233,51 @@ fn collect_log_source(cfg: &Config, src: &LogSource, bundle: &Path, warnings: &m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn today_only_skips_older_logs_but_lists_them() {
+        let root = std::env::temp_dir().join(format!("bb_today_{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let logs_dir = root.join("logs");
+        std::fs::create_dir_all(&logs_dir).unwrap();
+        std::fs::write(logs_dir.join("gotop.nav.debug.1.log"), "fresh\n").unwrap();
+        let old = logs_dir.join("gotop.qa.debug.2.log");
+        std::fs::write(&old, "old\n").unwrap();
+        let three_days = std::time::Duration::from_secs(3 * 86400);
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - three_days)
+            .unwrap();
+
+        let mut cfg = Config {
+            fallback_dir: root.join("out").to_string_lossy().into_owned(),
+            collect_event_log: false,
+            gotop_config_dir: root.join("nocfg").to_string_lossy().into_owned(),
+            logs: vec![LogSource {
+                label: "gotop".into(),
+                dir: logs_dir.to_string_lossy().into_owned(),
+                dirs: vec![],
+                extensions: vec![],
+                per_type: true,
+            }],
+            ..Config::default()
+        };
+        let snap = Snapshot::capture(&cfg, false);
+        let res = write(&cfg, &snap, "", false).unwrap();
+        let out = res.path.join("logs").join("gotop");
+        assert!(out.join("gotop.nav.debug.1.log.tail.txt").is_file());
+        assert!(!out.join("gotop.qa.debug.2.log.tail.txt").exists());
+        let index = std::fs::read_to_string(out.join("index.txt")).unwrap();
+        assert!(index.contains("(none today; newest: gotop.qa.debug.2.log"), "{index}");
+
+        // With the filter off, the old file is collected too.
+        cfg.logs_today_only = false;
+        let res2 = write(&cfg, &snap, "", false).unwrap();
+        assert!(res2.path.join("logs").join("gotop").join("gotop.qa.debug.2.log.tail.txt").is_file());
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn writes_bundle_with_fallback() {
