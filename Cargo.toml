@@ -1,0 +1,32 @@
+[package]
+name = "gotop-blackbox"
+version = "0.1.0"
+edition = "2021"
+description = "Flight recorder for GOTOP / ArcGIS Pro: one click collects context, logs and a screenshot into a support bundle on a network share."
+repository = "https://github.com/procrastinatio/lg-gotop-blackbox"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+toml = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+native-windows-gui = { version = "1", default-features = false, features = ["textbox"] }
+native-windows-derive = "1"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,31 @@
+# Copy to "gotop-blackbox.toml" next to gotop-blackbox.exe (or pass --config <path>).
+# Every value may contain %ENV_VARS%. All keys are optional.
+
+# Network share where bundles are written. Must be writable by the user.
+# If empty or unreachable, the bundle goes to `fallback_dir` and the user is told.
+share_path = '\\fileserver\support\gotop-blackbox'
+
+# Used when the share is unavailable. Default: <temp dir>\gotop-blackbox
+# fallback_dir = '%TEMP%\gotop-blackbox'
+
+# Lines kept from the end of each log file, and how many recent files per source.
+tail_lines = 200
+max_files_per_source = 3
+
+# Process-name substrings (case-insensitive) whose memory is recorded.
+processes = ["ArcGISPro", "GOTOP", "ArcGISIndexing"]
+
+# Windows Application event log: most recent errors/warnings (via built-in wevtutil).
+collect_event_log = true
+event_log_count = 50
+
+# Log sources. `extensions` defaults to ["log", "txt"].
+[[logs]]
+label = "esri-error-reports"
+dir = '%LOCALAPPDATA%\ESRI\ErrorReports'
+
+# TODO: add the real GOTOP log directory.
+# [[logs]]
+# label = "gotop"
+# dir = '%LOCALAPPDATA%\GOTOP\logs'
+# extensions = ["log"]
