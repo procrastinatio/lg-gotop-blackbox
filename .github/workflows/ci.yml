@@ -40,7 +40,7 @@ jobs:
       - name: GUI self-test (window must build, theme and icon must not crash)
         shell: pwsh
         run: |
-          & .\target-console\release\gotop-blackbox-console.exe --gui-selftest --no-screenshot
+          & .\target-console\release\gotop-blackbox.exe --gui-selftest --no-screenshot
           "exit=$LASTEXITCODE"
           Get-Content "$env:TEMP\gotop-blackbox.log" -Tail 8
           if ($LASTEXITCODE -ne 0) { throw "GUI self-test failed (exit=$LASTEXITCODE)" }
