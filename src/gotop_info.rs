@@ -34,8 +34,73 @@ pub struct GotopInfo {
     pub environment_name: Option<String>,
     /// Which log file the versions were read from.
     pub version_source: Option<String>,
+    /// Parent of the log directory, e.g. `Y:\Gotop` (drive differs: Y: VDI, D: office laptop, C: field laptop).
+    pub gotop_root: Option<String>,
+    /// `*.esriAddinX` files found in `<root>\Addins` (or `<root>`), with the version from their `Config.daml`.
+    pub installed_addins: Vec<InstalledAddin>,
     /// Matching environment variables (see `env_vars` in the config).
     pub env_vars: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InstalledAddin {
+    pub path: String,
+    pub version: Option<String>,
+    pub desktop_version: Option<String>,
+    pub modified: Option<String>,
+    pub size: u64,
+}
+
+/// `<AddInInfo id="{..}" version="0.3.2.2" desktopVersion="3.7">` -> `("0.3.2.2", Some("3.7"))`
+pub fn parse_addin_info(daml: &str) -> Option<(String, Option<String>)> {
+    let start = daml.find("<AddInInfo")?;
+    let tag = &daml[start..start + daml[start..].find('>')?];
+    let attr = |name: &str| -> Option<String> {
+        let key = format!(" {name}=\"");
+        let rest = &tag[tag.find(&key)? + key.len()..];
+        Some(rest[..rest.find('"')?].to_string())
+    };
+    Some((attr("version")?, attr("desktopVersion")))
+}
+
+fn read_addin(path: &Path) -> InstalledAddin {
+    let meta = std::fs::metadata(path).ok();
+    let (version, desktop_version) = (|| {
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()?;
+        let mut text = String::new();
+        zip.by_name("Config.daml").ok()?.read_to_string(&mut text).ok()?;
+        parse_addin_info(&text)
+    })()
+    .map_or((None, None), |(v, d)| (Some(v), d));
+    InstalledAddin {
+        path: path.display().to_string(),
+        version,
+        desktop_version,
+        modified: meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(|t| chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M:%S").to_string()),
+        size: meta.map_or(0, |m| m.len()),
+    }
+}
+
+/// `*.esriAddinX` files directly inside `<root>\Addins` and `<root>`.
+fn find_addins(root: &Path) -> Vec<InstalledAddin> {
+    let mut out = Vec::new();
+    for dir in [root.join("Addins"), root.to_path_buf()] {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let mut files: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.extension().and_then(|x| x.to_str()).is_some_and(|x| x.eq_ignore_ascii_case("esriAddinX"))
+            })
+            .collect();
+        files.sort();
+        out.extend(files.iter().map(|p| read_addin(p)));
+    }
+    out
 }
 
 /// `...Initializing Swisstopo.GoTop.AddIn.esriAddinX version 0.3.2.2 for ArcGIS 3.7.3.1904...`
@@ -113,23 +178,34 @@ fn search_order(base: &Path) -> Vec<PathBuf> {
     order
 }
 
-/// Newest non-empty `gotop.arcgispro.debug` log, from the first `per_type` source whose directory exists.
-fn find_version_log(cfg: &Config) -> Option<PathBuf> {
-    cfg.logs.iter().filter(|s| s.per_type).find_map(|src| {
-        let dir = src.candidates().into_iter().find(|d| d.is_dir())?;
-        logs::latest_per_type(&dir)
-            .ok()?
-            .into_iter()
-            .find(|t| t.log_type == VERSION_LOG_TYPE)?
-            .file
-    })
+/// The GOTOP log directory in use (first existing candidate of the first `per_type` source).
+fn gotop_log_dir(cfg: &Config) -> Option<PathBuf> {
+    cfg.logs
+        .iter()
+        .filter(|s| s.per_type)
+        .find_map(|src| src.candidates().into_iter().find(|d| d.is_dir()))
+}
+
+/// Newest non-empty `gotop.arcgispro.debug` log in `dir`.
+fn find_version_log(dir: &Path) -> Option<PathBuf> {
+    logs::latest_per_type(dir)
+        .ok()?
+        .into_iter()
+        .find(|t| t.log_type == VERSION_LOG_TYPE)?
+        .file
 }
 
 pub fn collect(cfg: &Config) -> (GotopInfo, Vec<String>) {
     let mut info = GotopInfo::default();
     let mut warnings = Vec::new();
 
-    match find_version_log(cfg) {
+    let log_dir = gotop_log_dir(cfg);
+    if let Some(root) = log_dir.as_deref().and_then(Path::parent) {
+        info.gotop_root = Some(root.display().to_string());
+        info.installed_addins = find_addins(root);
+    }
+
+    match log_dir.as_deref().and_then(find_version_log) {
         None => warnings.push("versions: no gotop.arcgispro.debug log found".into()),
         Some(base) => {
             for path in search_order(&base) {
@@ -176,6 +252,21 @@ pub fn collect(cfg: &Config) -> (GotopInfo, Vec<String>) {
         }
     }
 
+    // Installed (on disk) vs loaded (in the log): differs if ArcGIS Pro was not restarted after an install.
+    if let (Some(loaded), Some(inst)) = (
+        &info.addin_version,
+        info.installed_addins
+            .iter()
+            .find(|a| a.path.contains("Swisstopo.GoTop.AddIn."))
+            .and_then(|a| a.version.clone()),
+    ) {
+        if *loaded != inst {
+            warnings.push(format!(
+                "add-in installed on disk is {inst} but the last session loaded {loaded} (ArcGIS Pro not restarted after install, or stale log)"
+            ));
+        }
+    }
+
     let cfg_file = PathBuf::from(expand_env(cfg.gotop_config_dir.trim())).join("gotop.server.config.yml");
     match std::fs::read_to_string(&cfg_file) {
         Ok(text) => info.environment_name = yaml_value(&text, "EnvironmentName"),
@@ -208,6 +299,28 @@ mod tests {
             Some("0.3.2.2")
         );
         assert_eq!(server_version_from_dir("nothing"), None);
+    }
+
+    #[test]
+    fn parses_addin_info_and_reads_zip() {
+        let daml = "\u{feff}<?xml?>\n<ArcGIS>\n  <AddInInfo id=\"{8275}\" version=\"0.2.9.1\" desktopVersion=\"3.7\">\n</AddInInfo>";
+        assert_eq!(parse_addin_info(daml), Some(("0.2.9.1".into(), Some("3.7".into()))));
+        assert_eq!(parse_addin_info("<nothing/>"), None);
+
+        use std::io::Write;
+        let d = std::env::temp_dir().join(format!("bb_zip_{}", std::process::id()));
+        std::fs::remove_dir_all(&d).ok();
+        std::fs::create_dir_all(d.join("Addins")).unwrap();
+        let f = std::fs::File::create(d.join("Addins").join("Swisstopo.GoTop.AddIn.esriAddinX")).unwrap();
+        let mut w = zip::ZipWriter::new(f);
+        w.start_file("Config.daml", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(daml.as_bytes()).unwrap();
+        w.finish().unwrap();
+        let found = find_addins(&d);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].version.as_deref(), Some("0.2.9.1"));
+        assert_eq!(found[0].desktop_version.as_deref(), Some("3.7"));
+        std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]

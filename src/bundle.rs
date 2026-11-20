@@ -119,6 +119,15 @@ fn summary(snap: &Snapshot, g: &GotopInfo, message: &str, warnings: &[String]) -
         or_unknown(&g.dotnet_runtime)
     ));
     s.push_str(&format!("GOTOP server: {}\n", or_unknown(&g.server_version)));
+    for a in &g.installed_addins {
+        s.push_str(&format!(
+            "Installed: {} {} (ArcGIS Pro {}, file dated {})\n",
+            a.path,
+            a.version.as_deref().unwrap_or("?"),
+            a.desktop_version.as_deref().unwrap_or("?"),
+            a.modified.as_deref().unwrap_or("?")
+        ));
+    }
     s.push_str(&format!(
         "Environment: {}   (GOTOP_DDX_ENVIRONMENT: {})\n",
         or_unknown(&g.environment_name),
