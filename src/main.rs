@@ -69,7 +69,9 @@ fn run() -> Result<()> {
     let Some(args) = parse_args()? else { return Ok(()) };
     let cfg = config::Config::load(args.config.as_deref())?;
     diag::log("config loaded");
-    let snap = snapshot::Snapshot::capture(&cfg, !args.no_screenshot);
+    // The GUI takes its (delayed) screenshot on request; headless mode captures right away.
+    let headless = args.headless || cfg!(not(windows));
+    let snap = snapshot::Snapshot::capture(&cfg, headless && !args.no_screenshot);
     diag::log(&format!(
         "snapshot captured on {} ({}); screenshot: {}",
         snap.host,

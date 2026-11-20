@@ -16,7 +16,7 @@ Into `<share>\2026-11-20_1130_HOSTNAME_user\`:
 | File | Content |
 |---|---|
 | `description.txt` | What the user typed |
-| `screenshot.png` | Whole desktop, captured **at launch** (before the window appears) |
+| `screenshot.png` | Optional, whole desktop: press "Take screenshot..." in the window (3/5/10 s delay; the window minimizes meanwhile so you can bring the problem on screen) |
 | `report.json` | Timestamp, host, user, OS, RAM, ArcGIS/GOTOP process memory, warnings |
 | `logs/<source>/*.tail.txt` | Last N lines of the most recent log files per configured source |
 | `events-application.txt` | Recent Error/Warning entries from the Windows Application log |
