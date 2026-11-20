@@ -68,7 +68,6 @@ and writes to one folder. It opens no network ports and sends nothing.
 
 ## Open items
 
-- [ ] Real GOTOP log directories in the example config
 - [ ] Code signing
 
 ## Licence
