@@ -48,6 +48,13 @@ cargo test                                               # logic is cross-platfo
 
 CI builds the Windows exe on every push (artifact `gotop-blackbox-windows`).
 
+## Troubleshooting
+
+The normal exe is a GUI-subsystem program: no console, errors go to dialogs and to
+`%TEMP%\gotop-blackbox.log`. If it "does nothing", run `gotop-blackbox-console.exe` (same code,
+console subsystem) from PowerShell/cmd to see output directly. Compare the hash with
+`SHA256SUMS.txt` shipped in the artifact: `Get-FileHash .\gotop-blackbox.exe`.
+
 ## Deployment note (AppLocker)
 
 Unlike Esri's Python, a new `.exe` is not pre-whitelisted. Ask IT to allow it by path, hash or

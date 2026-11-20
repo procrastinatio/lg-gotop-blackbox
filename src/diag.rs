@@ -37,7 +37,7 @@ pub fn install_panic_hook() {
     }));
 }
 
-#[cfg(all(windows, not(debug_assertions)))]
+#[cfg(all(windows, not(debug_assertions), not(feature = "console")))]
 pub fn notify(title: &str, text: &str) {
     use windows::core::PCWSTR;
     use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
@@ -49,7 +49,7 @@ pub fn notify(title: &str, text: &str) {
     }
 }
 
-#[cfg(not(all(windows, not(debug_assertions))))]
+#[cfg(not(all(windows, not(debug_assertions), not(feature = "console"))))]
 pub fn notify(title: &str, text: &str) {
     println!("[{title}] {text}");
 }

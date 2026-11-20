@@ -6,6 +6,10 @@ description = "Flight recorder for GOTOP / ArcGIS Pro: one click collects contex
 repository = "https://github.com/procrastinatio/lg-gotop-blackbox"
 publish = false
 
+[features]
+# Build as a console-subsystem exe (prints to the terminal) instead of a GUI-subsystem one.
+console = []
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

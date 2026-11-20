@@ -23,9 +23,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
       - run: cargo build --release
+      # Console variant: prints errors/--version to the terminal. For troubleshooting only.
+      - run: cargo build --release --features console --target-dir target-console
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/release/gotop-blackbox.exe dist/
+          cp target-console/release/gotop-blackbox.exe dist/gotop-blackbox-console.exe
+          cp gotop-blackbox.example.toml dist/
+          (cd dist && sha256sum *.exe > SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
           name: gotop-blackbox-windows
-          path: |
-            target/release/gotop-blackbox.exe
-            gotop-blackbox.example.toml
+          path: dist/
