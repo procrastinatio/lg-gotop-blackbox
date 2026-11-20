@@ -13,14 +13,26 @@ pub struct Config {
     pub collect_event_log: bool,
     pub event_log_count: u32,
     pub logs: Vec<LogSource>,
+    /// Hostname prefixes (case-insensitive) used to classify the machine in report.json.
+    pub vdi_prefixes: Vec<String>,
+    pub laptop_prefixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LogSource {
     pub label: String,
+    /// A directory, and/or `dirs` for several candidates (VDI and laptops keep logs in different
+    /// places). Candidates are tried in order; the first that exists is used.
+    #[serde(default)]
     pub dir: String,
+    #[serde(default)]
+    pub dirs: Vec<String>,
     #[serde(default = "default_extensions")]
     pub extensions: Vec<String>,
+    /// GOTOP naming (`<type>.<pid>.log[.n]`): take the newest non-empty file of *each* type
+    /// instead of the N newest files overall. `extensions` is ignored in this mode.
+    #[serde(default)]
+    pub per_type: bool,
 }
 
 fn default_extensions() -> Vec<String> {
@@ -37,11 +49,24 @@ impl Default for Config {
             processes: vec!["ArcGISPro".into(), "GOTOP".into(), "ArcGISIndexing".into()],
             collect_event_log: true,
             event_log_count: 50,
-            logs: vec![LogSource {
-                label: "esri-error-reports".into(),
-                dir: r"%LOCALAPPDATA%\ESRI\ErrorReports".into(),
-                extensions: default_extensions(),
-            }],
+            vdi_prefixes: vec!["cvt".into()],
+            laptop_prefixes: vec!["cm".into()],
+            logs: vec![
+                LogSource {
+                    label: "gotop".into(),
+                    dir: String::new(),
+                    dirs: vec![r"Y:\Gotop\Logs".into(), r"D:\Gotop\Logs".into(), r"C:\Gotop\Logs".into()],
+                    extensions: default_extensions(),
+                    per_type: true,
+                },
+                LogSource {
+                    label: "esri-error-reports".into(),
+                    dir: r"%LOCALAPPDATA%\ESRI\ErrorReports".into(),
+                    dirs: vec![],
+                    extensions: default_extensions(),
+                    per_type: false,
+                },
+            ],
         }
     }
 }
@@ -73,6 +98,30 @@ impl Config {
         } else {
             PathBuf::from(expand_env(&self.fallback_dir))
         }
+    }
+}
+
+impl LogSource {
+    /// All candidate directories, env-expanded, in order.
+    pub fn candidates(&self) -> Vec<PathBuf> {
+        std::iter::once(&self.dir)
+            .chain(self.dirs.iter())
+            .filter(|d| !d.trim().is_empty())
+            .map(|d| PathBuf::from(expand_env(d.trim())))
+            .collect()
+    }
+}
+
+/// `vdi`, `laptop` or `other`, from the hostname prefix.
+pub fn classify_host(cfg: &Config, host: &str) -> &'static str {
+    let h = host.to_lowercase();
+    let matches = |prefixes: &[String]| prefixes.iter().any(|p| !p.is_empty() && h.starts_with(&p.to_lowercase()));
+    if matches(&cfg.vdi_prefixes) {
+        "vdi"
+    } else if matches(&cfg.laptop_prefixes) {
+        "laptop"
+    } else {
+        "other"
     }
 }
 
@@ -116,6 +165,26 @@ mod tests {
         assert_eq!(expand_env(r"x\%BB_TEST_VAR%\y"), r"x\abc\y");
         assert_eq!(expand_env("%BB_NOPE_XYZ%"), "%BB_NOPE_XYZ%");
         assert_eq!(expand_env("100%"), "100%");
+    }
+
+    #[test]
+    fn classifies_hosts() {
+        let c = Config::default();
+        assert_eq!(classify_host(&c, "CVT03236"), "vdi");
+        assert_eq!(classify_host(&c, "CM123456"), "laptop");
+        assert_eq!(classify_host(&c, "zbook"), "other");
+    }
+
+    #[test]
+    fn candidates_combine_dir_and_dirs() {
+        let s = LogSource {
+            label: "x".into(),
+            dir: "a".into(),
+            dirs: vec!["b".into(), " ".into()],
+            extensions: vec![],
+            per_type: false,
+        };
+        assert_eq!(s.candidates(), vec![PathBuf::from("a"), PathBuf::from("b")]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::config::{expand_env, Config};
+use crate::config::{expand_env, Config, LogSource};
 use crate::{events, logs, snapshot::Snapshot};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -80,23 +80,8 @@ pub fn write(cfg: &Config, snap: &Snapshot, message: &str, include_screenshot: b
     }
 
     for src in &cfg.logs {
-        let src_dir = PathBuf::from(expand_env(&src.dir));
-        let out_dir = dir.join("logs").join(sanitize(&src.label));
-        match logs::newest_files(&src_dir, &src.extensions, cfg.max_files_per_source) {
-            Ok(files) if files.is_empty() => {
-                warnings.push(format!("log source '{}': no matching files in {}", src.label, src_dir.display()))
-            }
-            Ok(files) => {
-                std::fs::create_dir_all(&out_dir)?;
-                for f in files {
-                    let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                    match logs::tail_lines(&f, cfg.tail_lines) {
-                        Ok(text) => std::fs::write(out_dir.join(format!("{}.tail.txt", sanitize(fname))), text)?,
-                        Err(e) => warnings.push(format!("cannot read {}: {e}", f.display())),
-                    }
-                }
-            }
-            Err(e) => warnings.push(format!("log source '{}' ({}): {e}", src.label, src_dir.display())),
+        if let Err(e) = collect_log_source(cfg, src, &dir, &mut warnings) {
+            warnings.push(format!("log source '{}': {e:#}", src.label));
         }
     }
 
@@ -111,6 +96,74 @@ pub fn write(cfg: &Config, snap: &Snapshot, message: &str, include_screenshot: b
     std::fs::write(dir.join("report.json"), serde_json::to_vec_pretty(&report)?)?;
 
     Ok(BundleResult { path: dir, used_fallback, warnings })
+}
+
+fn collect_log_source(cfg: &Config, src: &LogSource, bundle: &Path, warnings: &mut Vec<String>) -> Result<()> {
+    let candidates = src.candidates();
+    let Some(src_dir) = candidates.iter().find(|d| d.is_dir()).cloned() else {
+        warnings.push(format!(
+            "log source '{}': none of these directories exist: {}",
+            src.label,
+            candidates.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+        ));
+        return Ok(());
+    };
+    let out_dir = bundle.join("logs").join(sanitize(&src.label));
+
+    if src.per_type {
+        let types = match logs::latest_per_type(&src_dir) {
+            Ok(t) if t.is_empty() => {
+                warnings.push(format!("log source '{}': no GOTOP logs in {}", src.label, src_dir.display()));
+                return Ok(());
+            }
+            Ok(t) => t,
+            Err(e) => {
+                warnings.push(format!("log source '{}' ({}): {e}", src.label, src_dir.display()));
+                return Ok(());
+            }
+        };
+        std::fs::create_dir_all(&out_dir)?;
+        // index.txt records every type seen, including ones whose files are all empty
+        // ("the error log is empty" is itself useful evidence).
+        let mut index = String::from("type | chosen file | modified | size (bytes) | files of this type\n");
+        for t in &types {
+            match &t.file {
+                Some(f) => {
+                    let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                    let modified = t
+                        .modified
+                        .map(|m| chrono::DateTime::<chrono::Local>::from(m).format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_default();
+                    index.push_str(&format!("{} | {fname} | {modified} | {} | {}\n", t.log_type, t.size, t.candidates));
+                    match logs::tail_with_rotation(f, t.previous.as_deref(), cfg.tail_lines) {
+                        Ok(text) => std::fs::write(out_dir.join(format!("{}.tail.txt", sanitize(fname))), text)?,
+                        Err(e) => warnings.push(format!("cannot read {}: {e}", f.display())),
+                    }
+                }
+                None => index.push_str(&format!("{} | (all empty) | | 0 | {}\n", t.log_type, t.candidates)),
+            }
+        }
+        std::fs::write(out_dir.join("index.txt"), index)?;
+        return Ok(());
+    }
+
+    match logs::newest_files(&src_dir, &src.extensions, cfg.max_files_per_source) {
+        Ok(files) if files.is_empty() => {
+            warnings.push(format!("log source '{}': no matching files in {}", src.label, src_dir.display()))
+        }
+        Ok(files) => {
+            std::fs::create_dir_all(&out_dir)?;
+            for f in files {
+                let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                match logs::tail_lines(&f, cfg.tail_lines) {
+                    Ok(text) => std::fs::write(out_dir.join(format!("{}.tail.txt", sanitize(fname))), text)?,
+                    Err(e) => warnings.push(format!("cannot read {}: {e}", f.display())),
+                }
+            }
+        }
+        Err(e) => warnings.push(format!("log source '{}' ({}): {e}", src.label, src_dir.display())),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

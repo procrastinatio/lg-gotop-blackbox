@@ -18,6 +18,8 @@ pub struct Snapshot {
     pub timestamp: String,
     pub tool_version: &'static str,
     pub host: String,
+    /// `vdi`, `laptop` or `other` (from hostname prefix, see config).
+    pub machine_kind: &'static str,
     pub user: String,
     pub os: String,
     pub total_mem_mb: u64,
@@ -46,10 +48,12 @@ impl Snapshot {
         sys.refresh_memory();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
+        let own_pid = sysinfo::get_current_pid().ok();
         let needles: Vec<String> = cfg.processes.iter().map(|p| p.to_lowercase()).collect();
         let mut processes: Vec<ProcInfo> = sys
             .processes()
             .values()
+            .filter(|p| Some(p.pid()) != own_pid) // our own exe name contains "gotop"
             .filter_map(|p| {
                 let name = p.name().to_string_lossy().into_owned();
                 let lower = name.to_lowercase();
@@ -63,12 +67,15 @@ impl Snapshot {
             .collect();
         processes.sort_by_key(|p| std::cmp::Reverse(p.rss_mb));
 
+        let host = System::host_name()
+            .or_else(|| std::env::var("COMPUTERNAME").ok())
+            .unwrap_or_else(|| "unknown-host".into());
+
         Snapshot {
+            machine_kind: crate::config::classify_host(cfg, &host),
+            host,
             timestamp: chrono::Local::now().to_rfc3339(),
             tool_version: env!("CARGO_PKG_VERSION"),
-            host: System::host_name()
-                .or_else(|| std::env::var("COMPUTERNAME").ok())
-                .unwrap_or_else(|| "unknown-host".into()),
             user: std::env::var("USERNAME")
                 .or_else(|_| std::env::var("USER"))
                 .unwrap_or_else(|_| "unknown-user".into()),

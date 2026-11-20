@@ -1,6 +1,7 @@
 //! Minimal Win32 GUI: one text box, one checkbox, one button.
 
 use crate::bundle;
+use crate::diag;
 use crate::config::Config;
 use crate::snapshot::Snapshot;
 use native_windows_derive as nwd;
@@ -55,6 +56,7 @@ impl App {
 
         match bundle::write(cfg, snap, &self.message.text(), include) {
             Ok(res) => {
+                diag::log(&format!("bundle written: {}", res.path.display()));
                 let mut text = format!("Bundle saved to:\n{}", res.path.display());
                 if res.used_fallback {
                     text.push_str("\n\nThe network share was NOT reachable: tell support where the files are.");
@@ -67,6 +69,7 @@ impl App {
                 self.exit();
             }
             Err(e) => {
+                diag::log(&format!("bundle failed: {e:#}"));
                 nwg::modal_error_message(&self.window, "Could not save bundle", &format!("{e:#}"));
             }
         }

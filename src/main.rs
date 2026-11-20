@@ -2,6 +2,7 @@
 
 mod bundle;
 mod config;
+mod diag;
 mod events;
 #[cfg(windows)]
 mod gui;
@@ -23,7 +24,10 @@ OPTIONS:
     --headless          No window: write the bundle immediately and print its path
     --message <TEXT>    Description to store (headless mode)
     --no-screenshot     Do not capture a screenshot
+    --version           Show version
     -h, --help          Show this help
+
+Diagnostics: progress and crashes are logged to %TEMP%\\gotop-blackbox.log
 ";
 
 #[derive(Default)]
@@ -43,8 +47,12 @@ fn parse_args() -> Result<Option<Args>> {
             "--message" => a.message = it.next().ok_or_else(|| anyhow::anyhow!("--message needs a value"))?,
             "--headless" => a.headless = true,
             "--no-screenshot" => a.no_screenshot = true,
+            "--version" => {
+                diag::notify("gotop-blackbox", env!("CARGO_PKG_VERSION"));
+                return Ok(None);
+            }
             "-h" | "--help" => {
-                print_or_dialog("gotop-blackbox", HELP);
+                diag::notify("gotop-blackbox", HELP);
                 return Ok(None);
             }
             other => anyhow::bail!("unknown argument: {other}\n\n{HELP}"),
@@ -53,31 +61,33 @@ fn parse_args() -> Result<Option<Args>> {
     Ok(Some(a))
 }
 
-/// Release builds on Windows have no console, so surface text via a dialog there.
-fn print_or_dialog(title: &str, text: &str) {
-    #[cfg(all(windows, not(debug_assertions)))]
-    {
-        native_windows_gui::init().ok();
-        native_windows_gui::simple_message(title, text);
-    }
-    #[cfg(not(all(windows, not(debug_assertions))))]
-    {
-        let _ = title;
-        println!("{text}");
-    }
-}
-
 fn run() -> Result<()> {
+    diag::log(&format!("start v{} args={:?}", env!("CARGO_PKG_VERSION"), std::env::args().skip(1).collect::<Vec<_>>()));
     let Some(args) = parse_args()? else { return Ok(()) };
     let cfg = config::Config::load(args.config.as_deref())?;
+    diag::log("config loaded");
     let snap = snapshot::Snapshot::capture(&cfg, !args.no_screenshot);
+    diag::log(&format!(
+        "snapshot captured on {} ({}); screenshot: {}",
+        snap.host,
+        snap.machine_kind,
+        match (&snap.screenshot_png, &snap.screenshot_error) {
+            (Some(p), _) => format!("ok, {} KB", p.len() / 1024),
+            (None, Some(e)) => format!("failed: {e}"),
+            (None, None) => "skipped".into(),
+        }
+    ));
 
     #[cfg(windows)]
     if !args.headless {
-        return gui::run(cfg, snap);
+        diag::log("opening window");
+        let r = gui::run(cfg, snap);
+        diag::log(&format!("window closed: {}", if r.is_ok() { "ok".to_string() } else { format!("{r:?}") }));
+        return r;
     }
 
     let res = bundle::write(&cfg, &snap, &args.message, !args.no_screenshot)?;
+    diag::log(&format!("bundle written: {}", res.path.display()));
     let mut out = format!("Bundle saved to {}", res.path.display());
     if res.used_fallback {
         out.push_str("\nnote: network share not used; bundle is local");
@@ -85,13 +95,15 @@ fn run() -> Result<()> {
     for w in &res.warnings {
         out.push_str(&format!("\nwarning: {w}"));
     }
-    print_or_dialog("gotop-blackbox", &out);
+    diag::notify("gotop-blackbox", &out);
     Ok(())
 }
 
 fn main() {
+    diag::install_panic_hook();
     if let Err(e) = run() {
-        print_or_dialog("gotop-blackbox error", &format!("{e:#}"));
+        diag::log(&format!("error: {e:#}"));
+        diag::notify("gotop-blackbox error", &format!("{e:#}"));
         std::process::exit(1);
     }
 }

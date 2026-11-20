@@ -1,15 +1,19 @@
 # Copy to "gotop-blackbox.toml" next to gotop-blackbox.exe (or pass --config <path>).
 # Every value may contain %ENV_VARS%. All keys are optional.
+# Site-specific values (real share, hostnames) belong in a *local* copy: "*.local.toml" is git-ignored.
 
 # Network share where bundles are written. Must be writable by the user.
+# Prefer a UNC path: drive letters (P:, ...) differ between users.
 # If empty or unreachable, the bundle goes to `fallback_dir` and the user is told.
-share_path = '\\fileserver\support\gotop-blackbox'
+share_path = '\\fileserver\share\path\gotop-blackbox'
 
 # Used when the share is unavailable. Default: <temp dir>\gotop-blackbox
 # fallback_dir = '%TEMP%\gotop-blackbox'
 
-# Lines kept from the end of each log file, and how many recent files per source.
+# Lines kept from the end of each log file. If the current file is shorter
+# (just rotated), the missing lines come from its ".1" predecessor.
 tail_lines = 200
+# Only for sources without `per_type`: how many recent files to take.
 max_files_per_source = 3
 
 # Process-name substrings (case-insensitive) whose memory is recorded.
@@ -19,13 +23,16 @@ processes = ["ArcGISPro", "GOTOP", "ArcGISIndexing"]
 collect_event_log = true
 event_log_count = 50
 
-# Log sources. `extensions` defaults to ["log", "txt"].
+# GOTOP logs: <type>.<pid>.log[.n], e.g. gotop.navigator.debug.7716.log
+# `per_type = true` takes the newest NON-EMPTY file of each type (arcgispro / navigator /
+# microservice.{editing,geometry,qa} x debug / error). Types that may be absent are simply skipped,
+# and logs/gotop/index.txt lists every type seen (including "all empty" ones).
+[[logs]]
+label = "gotop"
+dir = 'Y:\Gotop\Logs'
+per_type = true
+
 [[logs]]
 label = "esri-error-reports"
 dir = '%LOCALAPPDATA%\ESRI\ErrorReports'
-
-# TODO: add the real GOTOP log directory.
-# [[logs]]
-# label = "gotop"
-# dir = '%LOCALAPPDATA%\GOTOP\logs'
-# extensions = ["log"]
+# extensions = ["log", "txt"]   # default
