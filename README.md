@@ -55,6 +55,10 @@ The normal exe is a GUI-subsystem program: no console, errors go to dialogs and 
 console subsystem) from PowerShell/cmd to see output directly. Compare the hash with
 `SHA256SUMS.txt` shipped in the artifact: `Get-FileHash .\gotop-blackbox.exe`.
 
+Exit code `0xC0000139` (-1073741511, "entry point not found") means the Windows loader rejected the
+exe before `main`: historically a missing Common Controls v6 manifest (see `assets/`). CI runs the
+console exe with `--version` to guard against this.
+
 ## Deployment note (AppLocker)
 
 Unlike Esri's Python, a new `.exe` is not pre-whitelisted. Ask IT to allow it by path, hash or

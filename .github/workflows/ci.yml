@@ -25,6 +25,18 @@ jobs:
       - run: cargo build --release
       # Console variant: prints errors/--version to the terminal. For troubleshooting only.
       - run: cargo build --release --features console --target-dir target-console
+      - name: Smoke test (the exe must at least start)
+        shell: pwsh
+        run: |
+          $out = & .\target-console\release\gotop-blackbox.exe --version
+          "exit=$LASTEXITCODE out=$out"
+          if ($LASTEXITCODE -ne 0 -or "$out" -notmatch '\d+\.\d+\.\d+') { throw "console exe did not start (exit=$LASTEXITCODE, hex 0x{0:X})" -f $LASTEXITCODE }
+          # The GUI exe must carry the Common Controls v6 manifest.
+          foreach ($f in 'target\release\gotop-blackbox.exe','target-console\release\gotop-blackbox.exe') {
+            $bytes = [IO.File]::ReadAllBytes($f)
+            $text = [Text.Encoding]::ASCII.GetString($bytes)
+            if ($text -notmatch 'Microsoft\.Windows\.Common-Controls') { throw "$f has no Common Controls manifest" }
+          }
       - name: Stage artifact
         shell: bash
         run: |
