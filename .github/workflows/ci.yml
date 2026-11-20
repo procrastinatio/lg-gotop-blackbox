@@ -44,6 +44,18 @@ jobs:
           "exit=$LASTEXITCODE"
           Get-Content "$env:TEMP\gotop-blackbox.log" -Tail 8
           if ($LASTEXITCODE -ne 0) { throw "GUI self-test failed (exit=$LASTEXITCODE)" }
+      - name: Bundle self-test (wevtutil must accept the event-log query)
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'bb-selftest'
+          Set-Content -Path "$dir.toml" -Value @("share_path = ''", "fallback_dir = '$dir'", "logs = []")
+          & .\target-console\release\gotop-blackbox.exe --config "$dir.toml" --headless --no-screenshot
+          $rep = Get-ChildItem $dir -Directory | Select-Object -First 1
+          $j = Get-Content (Join-Path $rep.FullName 'report.json') -Raw | ConvertFrom-Json
+          "warnings: $($j.warnings -join ' | ')"
+          Get-ChildItem $rep.FullName | Select-Object Name, Length
+          if ($j.warnings -match 'event log') { throw "event log collection failed" }
+          if (-not (Test-Path (Join-Path $rep.FullName 'events-application.txt'))) { throw "events-application.txt missing" }
       - name: Stage artifact
         shell: bash
         run: |

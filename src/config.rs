@@ -12,6 +12,8 @@ pub struct Config {
     pub processes: Vec<String>,
     pub collect_event_log: bool,
     pub event_log_count: u32,
+    /// Only events from the last N hours.
+    pub event_log_hours: u32,
     pub logs: Vec<LogSource>,
     /// Directory holding `gotop.server.config.yml` (only its `EnvironmentName` key is read).
     pub gotop_config_dir: String,
@@ -53,6 +55,7 @@ impl Default for Config {
             processes: vec!["ArcGISPro".into(), "GOTOP".into(), "ArcGISIndexing".into()],
             collect_event_log: true,
             event_log_count: 50,
+            event_log_hours: 72,
             gotop_config_dir: r"%LOCALAPPDATA%\swisstopo\GoTop\Config".into(),
             env_vars: vec!["GOTOP_*".into(), "TNS_ADMIN".into()],
             vdi_prefixes: vec!["cvt".into()],

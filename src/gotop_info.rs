@@ -30,8 +30,12 @@ pub struct GotopInfo {
     pub dotnet_runtime: Option<String>,
     /// Version parsed from the `GOTOP_SERVER_DIR` folder name (`GoTop_Server_0.3.2.2_...`).
     pub server_version: Option<String>,
-    /// `EnvironmentName` from `gotop.server.config.yml`.
+    /// `EnvironmentName` from `gotop.server.config.yml`, if that key exists.
     pub environment_name: Option<String>,
+    /// GOTOP instance taken from `GOTOP_CENTRAL_TOOL_DEFAULTS` (`...\instances\GCOVERP\...` -> `GCOVERP`).
+    pub instance: Option<String>,
+    /// Every `*environment*` key/value found in `gotop.server.config.yml` (keys with short values only).
+    pub config_environment_keys: BTreeMap<String, String>,
     /// Which log file the versions were read from.
     pub version_source: Option<String>,
     /// Parent of the log directory, e.g. `Y:\Gotop` (drive differs: Y: VDI, D: office laptop, C: field laptop).
@@ -143,6 +147,27 @@ pub fn server_version_from_dir(dir: &str) -> Option<String> {
                 && t.chars().all(|c| c.is_ascii_digit() || c == '.')
         })
         .map(str::to_string)
+}
+
+/// `\\srv\gotopconfig\instances\GCOVERP\CorporateEditor\ToolDefaults` -> `GCOVERP`
+pub fn instance_from_tool_defaults(path: &str) -> Option<String> {
+    let mut parts = path.split(['\\', '/']).filter(|p| !p.is_empty());
+    parts.find(|p| p.eq_ignore_ascii_case("instances"))?;
+    parts.next().map(str::to_string)
+}
+
+/// All `key: value` lines whose key mentions "environment" (case-insensitive), values capped at 80 chars.
+pub fn environment_keys(text: &str) -> BTreeMap<String, String> {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| {
+            let (k, v) = l.trim().split_once(':')?;
+            let k = k.trim().trim_start_matches("- ");
+            let v = v.split(" #").next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'');
+            (k.to_lowercase().contains("environment") && !v.is_empty() && v.len() <= 80)
+                .then(|| (k.to_string(), v.to_string()))
+        })
+        .collect()
 }
 
 fn env_matches(name: &str, patterns: &[String]) -> bool {
@@ -268,8 +293,22 @@ pub fn collect(cfg: &Config) -> (GotopInfo, Vec<String>) {
     }
 
     let cfg_file = PathBuf::from(expand_env(cfg.gotop_config_dir.trim())).join("gotop.server.config.yml");
+    info.instance = info
+        .env_vars
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("GOTOP_CENTRAL_TOOL_DEFAULTS"))
+        .and_then(|(_, v)| instance_from_tool_defaults(v));
     match std::fs::read_to_string(&cfg_file) {
-        Ok(text) => info.environment_name = yaml_value(&text, "EnvironmentName"),
+        Ok(text) => {
+            info.environment_name = yaml_value(&text, "EnvironmentName");
+            info.config_environment_keys = environment_keys(&text);
+            if info.environment_name.is_none() {
+                warnings.push(format!(
+                    "environment: no 'EnvironmentName' key in {} (environment-like keys recorded in report.json)",
+                    cfg_file.display()
+                ));
+            }
+        }
         Err(e) => warnings.push(format!("environment: cannot read {}: {e}", cfg_file.display())),
     }
 
@@ -321,6 +360,19 @@ mod tests {
         assert_eq!(found[0].version.as_deref(), Some("0.2.9.1"));
         assert_eq!(found[0].desktop_version.as_deref(), Some("3.7"));
         std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn instance_and_environment_keys() {
+        assert_eq!(
+            instance_from_tool_defaults(r"\\v0t\prod\gotopconfig\instances\GCOVERP\CorporateEditor\ToolDefaults").as_deref(),
+            Some("GCOVERP")
+        );
+        assert_eq!(instance_from_tool_defaults(r"C:\somewhere"), None);
+        let y = "Database:\n  DdxEnvironmentName: GCOVERP_DDX\n  Password: secret\n# EnvironmentX: ignored\nenvironment: \n";
+        let k = environment_keys(y);
+        assert_eq!(k.len(), 1);
+        assert_eq!(k["DdxEnvironmentName"], "GCOVERP_DDX");
     }
 
     #[test]

@@ -19,9 +19,11 @@ max_files_per_source = 3
 # Process-name substrings (case-insensitive) whose memory is recorded.
 processes = ["ArcGISPro", "GOTOP", "ArcGISIndexing"]
 
-# Windows Application event log: most recent errors/warnings (via built-in wevtutil).
+# Windows Application event log: recent errors and crashes (via built-in wevtutil).
 collect_event_log = true
 event_log_count = 50
+# Only events from the last N hours; errors/criticals plus crash/hang sources.
+event_log_hours = 72
 
 # Where gotop.server.config.yml lives. Only its `EnvironmentName` key is read (never copied).
 gotop_config_dir = '%LOCALAPPDATA%\swisstopo\GoTop\Config'

@@ -88,7 +88,7 @@ pub fn write(cfg: &Config, snap: &Snapshot, message: &str, include_screenshot: b
     }
 
     if cfg.collect_event_log {
-        match events::recent_application_events(cfg.event_log_count) {
+        match events::recent_application_events(cfg.event_log_count, cfg.event_log_hours) {
             Ok(text) => std::fs::write(dir.join("events-application.txt"), text)?,
             Err(e) => warnings.push(format!("event log: {e:#}")),
         }
@@ -129,8 +129,9 @@ fn summary(snap: &Snapshot, g: &GotopInfo, message: &str, warnings: &[String]) -
         ));
     }
     s.push_str(&format!(
-        "Environment: {}   (GOTOP_DDX_ENVIRONMENT: {})\n",
-        or_unknown(&g.environment_name),
+        "Environment: {}   (instance: {}, DDX: {})\n",
+        g.environment_name.as_deref().or(g.instance.as_deref()).unwrap_or("unknown"),
+        g.instance.as_deref().unwrap_or("?"),
         ddx.unwrap_or("unset")
     ));
     for p in snap.processes.iter().take(5) {
