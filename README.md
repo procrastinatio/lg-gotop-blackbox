@@ -69,5 +69,8 @@ and writes to one folder. It opens no network ports and sends nothing.
 ## Open items
 
 - [ ] Real GOTOP log directories in the example config
-- [ ] Choose a licence
 - [ ] Code signing
+
+## Licence
+
+BSD 3-Clause, Copyright (c) 2026 Federal Office of Topography swisstopo. See [LICENSE](LICENSE).

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Flight recorder for GOTOP / ArcGIS Pro: one click collects context, logs and a screenshot into a support bundle on a network share."
 repository = "https://github.com/procrastinatio/lg-gotop-blackbox"
+license = "BSD-3-Clause"
 publish = false
 
 [features]
