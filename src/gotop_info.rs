@@ -38,6 +38,8 @@ pub struct GotopInfo {
     pub config_environment_keys: BTreeMap<String, String>,
     /// Which log file the versions were read from.
     pub version_source: Option<String>,
+    /// The work unit (WU) in use, from today's logs.
+    pub work_unit: crate::work_unit::WorkUnitInfo,
     /// Parent of the log directory, e.g. `Y:\Gotop` (drive differs: Y: VDI, D: office laptop, C: field laptop).
     pub gotop_root: Option<String>,
     /// `*.esriAddinX` files found in `<root>\Addins` (or `<root>`), with the version from their `Config.daml`.
@@ -185,7 +187,7 @@ fn read_head(path: &Path) -> std::io::Result<String> {
 }
 
 /// `base` followed by its rotated siblings, oldest first (`.log.14` ... `.log.1`, then `.log`).
-fn search_order(base: &Path) -> Vec<PathBuf> {
+pub(crate) fn search_order(base: &Path) -> Vec<PathBuf> {
     let mut rotated: Vec<(u32, PathBuf)> = Vec::new();
     if let (Some(dir), Some(name)) = (base.parent(), base.file_name().and_then(|n| n.to_str())) {
         let prefix = format!("{name}.");
@@ -226,6 +228,9 @@ pub fn collect(cfg: &Config) -> (GotopInfo, Vec<String>) {
     if let Some(root) = log_dir.as_deref().and_then(Path::parent) {
         info.gotop_root = Some(root.display().to_string());
         info.installed_addins = find_addins(root);
+    }
+    if let Some(dir) = log_dir.as_deref() {
+        info.work_unit = crate::work_unit::collect(cfg, dir);
     }
 
     match log_dir.as_deref().and_then(find_version_log) {

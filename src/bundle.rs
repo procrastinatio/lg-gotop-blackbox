@@ -119,6 +119,26 @@ fn summary(snap: &Snapshot, g: &GotopInfo, message: &str, warnings: &[String]) -
         or_unknown(&g.dotnet_runtime)
     ));
     s.push_str(&format!("GOTOP server: {}\n", or_unknown(&g.server_version)));
+    let wu = &g.work_unit;
+    match &wu.name {
+        Some(name) => {
+            s.push_str(&format!(
+                "Work unit: {name}  ({}; from {})\n",
+                wu.full_id.as_deref().unwrap_or("full id unknown"),
+                wu.source.as_deref().unwrap_or("?")
+            ));
+            if let Some(dv) = &wu.daily_version {
+                s.push_str(&format!("  daily version: {dv}\n"));
+            }
+            if let Some(aprx) = &wu.aprx {
+                s.push_str(&format!("  project: {aprx}\n"));
+            }
+            if wu.opened.len() > 1 {
+                s.push_str(&format!("  opened in this session: {}\n", wu.opened.join(", ")));
+            }
+        }
+        None => s.push_str("Work unit: none seen in today's logs\n"),
+    }
     for a in &g.installed_addins {
         s.push_str(&format!(
             "Installed: {} {} (ArcGIS Pro {}, file dated {})\n",

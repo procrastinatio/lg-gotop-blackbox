@@ -10,6 +10,7 @@ mod gui;
 mod logs;
 mod screenshot;
 mod snapshot;
+mod work_unit;
 
 use anyhow::Result;
 use std::path::PathBuf;

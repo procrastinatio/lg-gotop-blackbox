@@ -109,18 +109,22 @@ pub fn latest_per_type(dir: &Path) -> std::io::Result<Vec<TypeLatest>> {
     Ok(out)
 }
 
-/// Last `n` lines of a file, decoded lossily as UTF-8.
-pub fn tail_lines(path: &Path, n: usize) -> std::io::Result<String> {
+/// The last `max_bytes` of a file, decoded lossily as UTF-8 (the first line may be partial).
+pub fn read_tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
     let mut f = File::open(path)?;
     let len = f.metadata()?.len();
-    let start = len.saturating_sub(MAX_TAIL_BYTES);
-    f.seek(SeekFrom::Start(start))?;
+    f.seek(SeekFrom::Start(len.saturating_sub(max_bytes)))?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
-    let text = String::from_utf8_lossy(&buf);
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Last `n` lines of a file, decoded lossily as UTF-8.
+pub fn tail_lines(path: &Path, n: usize) -> std::io::Result<String> {
+    let text = read_tail(path, MAX_TAIL_BYTES)?;
     let lines: Vec<&str> = text.lines().collect();
     // If we started mid-file the first line is probably partial; it falls outside `n` anyway
-    // unless the file is tiny, in which case start == 0 and nothing is cut.
+    // unless the file is tiny, in which case nothing was cut.
     let from = lines.len().saturating_sub(n);
     Ok(lines[from..].join("\n"))
 }
