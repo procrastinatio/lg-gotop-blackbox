@@ -217,7 +217,12 @@ fn collect_log_source(cfg: &Config, src: &LogSource, bundle: &Path, warnings: &m
             match (today, &t.file, t.modified) {
                 (Some((f, m)), _, _) => {
                     let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                    index.push_str(&format!("{} | {fname} | {} | {} | {}\n", t.log_type, fmt_time(m), t.size, t.candidates));
+                    let stale = t.pid_running == Some(false);
+                    let note = if stale { " | pid NOT running: log of an earlier session" } else { "" };
+                    index.push_str(&format!("{} | {fname} | {} | {} | {}{note}\n", t.log_type, fmt_time(m), t.size, t.candidates));
+                    if stale && t.log_type.ends_with(".debug") {
+                        warnings.push(format!("{fname}: its process is not running, so this log is from an earlier session"));
+                    }
                     match logs::tail_with_rotation(f, t.previous.as_deref(), cfg.tail_lines) {
                         Ok(text) => std::fs::write(out_dir.join(format!("{}.tail.txt", sanitize(fname))), text)?,
                         Err(e) => warnings.push(format!("cannot read {}: {e}", f.display())),
