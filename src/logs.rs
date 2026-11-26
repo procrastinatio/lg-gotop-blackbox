@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -56,6 +56,22 @@ pub fn parse_name(name: &str) -> Option<(&str, u32)> {
     is_digits(pid).then_some((log_type, rotation))
 }
 
+/// The process id embedded in a GOTOP log name (`<type>.<pid>.log[.<n>]`).
+pub fn parse_pid(name: &str) -> Option<u32> {
+    let stem = match name.rsplit_once('.') {
+        Some((head, last)) if head.ends_with(".log") && last.bytes().all(|b| b.is_ascii_digit()) => head,
+        _ => name,
+    };
+    stem.strip_suffix(".log")?.rsplit_once('.')?.1.parse().ok()
+}
+
+/// Ids of all processes running now.
+pub fn running_pids() -> HashSet<u32> {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    sys.processes().keys().map(|p| p.as_u32()).collect()
+}
+
 /// The newest log of one type (one process instance).
 #[derive(Debug)]
 pub struct TypeLatest {
@@ -68,11 +84,21 @@ pub struct TypeLatest {
     pub previous: Option<PathBuf>,
     /// How many current files of this type exist (empty ones included).
     pub candidates: usize,
+    /// Whether the process whose pid is in `file`'s name is running (`None` if no file chosen).
+    pub pid_running: Option<bool>,
 }
 
-/// For every log type found in `dir`, pick the newest non-empty current (non-rotated) file.
+/// For every log type found in `dir`, pick the log of the *running* process if there is one,
+/// else the newest non-empty current (non-rotated) file. Modification time alone is not
+/// reliable: a live process's file may look stale (lazy NTFS timestamps, or a just-rotated
+/// empty current file) and an older session's log then wins.
 /// Types whose files are all empty are still listed (with `file: None`): "no errors logged" is evidence.
 pub fn latest_per_type(dir: &Path) -> std::io::Result<Vec<TypeLatest>> {
+    latest_per_type_with(dir, &running_pids())
+}
+
+pub fn latest_per_type_with(dir: &Path, live_pids: &HashSet<u32>) -> std::io::Result<Vec<TypeLatest>> {
+    let mut slot_live: HashMap<String, bool> = HashMap::new();
     let mut by_type: BTreeMap<String, TypeLatest> = BTreeMap::new();
     for entry in std::fs::read_dir(dir)?.filter_map(|e| e.ok()) {
         let Ok(meta) = entry.metadata() else { continue };
@@ -88,13 +114,24 @@ pub fn latest_per_type(dir: &Path) -> std::io::Result<Vec<TypeLatest>> {
             size: 0,
             previous: None,
             candidates: 0,
+            pid_running: None,
         });
         slot.candidates += 1;
         let Ok(modified) = meta.modified() else { continue };
-        if meta.len() > 0 && slot.modified.is_none_or(|m| modified > m) {
+        let live = parse_pid(&name).is_some_and(|p| live_pids.contains(&p));
+        // An empty current file of a live process is usable if it was just rotated (`.1` exists).
+        let usable = meta.len() > 0 || (live && PathBuf::from(format!("{}.1", entry.path().display())).is_file());
+        let cur_live = slot_live.get(log_type).copied().unwrap_or(false);
+        let better = match slot.file {
+            None => true,
+            Some(_) => (live, Some(modified)) > (cur_live, slot.modified),
+        };
+        if usable && better {
             slot.file = Some(entry.path());
             slot.modified = Some(modified);
             slot.size = meta.len();
+            slot.pid_running = Some(live);
+            slot_live.insert(log_type.to_string(), live);
         }
     }
     let mut out: Vec<TypeLatest> = by_type.into_values().collect();
@@ -198,7 +235,7 @@ mod tests {
         std::fs::write(d.join("gotop.nav.error.300.log"), "").unwrap(); // only empty files
         std::fs::write(d.join("unrelated.log"), "x").unwrap();
 
-        let got = latest_per_type(&d).unwrap();
+        let got = latest_per_type_with(&d, &HashSet::new()).unwrap();
         assert_eq!(got.len(), 2);
         let debug = &got[0];
         assert_eq!(debug.log_type, "gotop.nav.debug");
@@ -209,6 +246,28 @@ mod tests {
 
         let text = tail_with_rotation(debug.file.as_ref().unwrap(), debug.previous.as_deref(), 4).unwrap();
         assert_eq!(text, "r2\nr3\n----- rotation boundary -----\nnew1\nnew2");
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn prefers_log_of_running_pid_over_newer_stale_one() {
+        let d = tmp("livepid");
+        std::fs::write(d.join("gotop.pro.debug.24716.log"), "live\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::fs::write(d.join("gotop.pro.debug.17516.log"), "stale but newer\n").unwrap();
+        let live: HashSet<u32> = [24716].into();
+        let got = latest_per_type_with(&d, &live).unwrap();
+        assert!(got[0].file.as_ref().unwrap().ends_with("gotop.pro.debug.24716.log"));
+        assert_eq!(got[0].pid_running, Some(true));
+        let got_dead = latest_per_type_with(&d, &HashSet::new()).unwrap();
+        assert_eq!(got_dead[0].pid_running, Some(false));
+        // Just rotated: live current file empty, `.1` holds the content.
+        std::fs::write(d.join("gotop.pro.debug.24716.log"), "").unwrap();
+        std::fs::write(d.join("gotop.pro.debug.24716.log.1"), "old part\n").unwrap();
+        let got = latest_per_type_with(&d, &live).unwrap();
+        assert!(got[0].file.as_ref().unwrap().ends_with("gotop.pro.debug.24716.log"));
+        assert!(got[0].previous.is_some());
+        assert_eq!(parse_pid("gotop.pro.debug.24716.log.2"), Some(24716));
         std::fs::remove_dir_all(&d).ok();
     }
 }
